@@ -10,7 +10,11 @@ class Request extends Component {
     submitStatus: null,
     submitMessage: '',
     responseData: null,
-    errors: {}
+    errors: {},
+    showModal: false,
+    modalType: null, // 'success' or 'error'
+    modalMessage: '',
+    modalDetails: null
   };
 
   componentDidMount() {
@@ -31,14 +35,14 @@ class Request extends Component {
   validateForm = (formData, cvFile) => {
     const errors = {};
     
-    // if (!formData.firstName) errors.firstName = 'First name is required';
-    // if (!formData.lastName) errors.lastName = 'Last name is required';
-    // if (!formData.email) {
-    //   errors.email = 'Email is required';
-    // } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-    //   errors.email = 'Email is invalid';
-    // }
-    // if (!formData.phone) errors.phone = 'Phone number is required';
+    if (!formData.first_name) errors.first_name = 'First name is required';
+    if (!formData.last_name) errors.last_name = 'Last name is required';
+    if (!formData.email) {
+      errors.email = 'Email is required';
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      errors.email = 'Email is invalid';
+    }
+    if (!formData.phone_number) errors.phone_number = 'Phone number is required';
     
     return errors;
   };
@@ -48,7 +52,7 @@ class Request extends Component {
 
     const form = e.target;
     
-    // Get form values
+    // Get form values and map to API field names
     const formData = {
       first_name: form.firstName.value,
       middle_name: form.middleName.value || '', // Optional
@@ -66,17 +70,17 @@ class Request extends Component {
     const errors = this.validateForm(formData, cvFile);
     
     if (!cvFile) {
-      errors.cv = "Please upload your CV";
+      errors.cv_file = "Please upload your CV";
     } else {
       // Validate file size (max 5MB)
       if (cvFile.size > 5 * 1024 * 1024) {
-        errors.cv = "File size must be less than 5MB";
+        errors.cv_file = "File size must be less than 5MB";
       }
       
       // Validate file type
       const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
       if (!validTypes.includes(cvFile.type)) {
-        errors.cv = "Please upload PDF or Word documents only";
+        errors.cv_file = "Please upload PDF or Word documents only";
       }
     }
 
@@ -84,9 +88,9 @@ class Request extends Component {
     if (Object.keys(errors).length > 0) {
       this.setState({ errors });
       
-      // Show first error as alert
+      // Show first error as modal
       const firstError = Object.values(errors)[0];
-      alert(firstError);
+      this.showModal('error', 'Validation Error', firstError);
       return;
     }
 
@@ -97,7 +101,7 @@ class Request extends Component {
       // Create FormData for multipart/form-data
       const apiFormData = new FormData();
       
-      // Append all fields
+      // Append all fields (using exact API field names)
       apiFormData.append('first_name', formData.first_name);
       apiFormData.append('middle_name', formData.middle_name);
       apiFormData.append('last_name', formData.last_name);
@@ -112,30 +116,43 @@ class Request extends Component {
         apiFormData.append('fan_number', formData.fan_number);
       }
       
-      // Append the CV file
-      apiFormData.append('cv', cvFile);
+      // Append the CV file with the correct field name 'cv_file'
+      apiFormData.append('cv_file', cvFile);
 
-      // Make API call
-      const response = await fetch('http://127.0.0.1:8000/cv/submit', {
+      // Make API call to the correct endpoint
+      const response = await fetch('http://127.0.0.1:8000/api/v1/cv/submit', {
         method: 'POST',
         body: apiFormData
-        // Don't set Content-Type header - browser will set it with boundary
       });
 
       const responseData = await response.json();
 
       if (!response.ok) {
+        // Handle validation errors (422)
+        if (response.status === 422) {
+          const validationErrors = responseData.detail || [];
+          const errorMessages = validationErrors.map(err => `${err.loc.join('.')}: ${err.msg}`).join('\n');
+          throw new Error(errorMessages || 'Validation failed');
+        }
         throw new Error(responseData.message || 'Submission failed');
       }
 
       // Successful submission
       console.log('API Response:', responseData);
       
+      // Show success modal
+      this.showModal(
+        'success', 
+        'CV Submitted Successfully!', 
+        responseData.message || 'Your CV has been submitted successfully.',
+        responseData
+      );
+      
       this.setState({
         showConfetti: true,
         isLoading: false,
         submitStatus: 'success',
-        submitMessage: responseData.message || 'CV submitted successfully!',
+        submitMessage: typeof responseData === 'string' ? responseData : 'CV submitted successfully!',
         responseData: responseData
       });
 
@@ -147,20 +164,41 @@ class Request extends Component {
         this.setState({ showConfetti: false });
       }, 5000);
 
-      // Show success message
-      alert(`✅ ${responseData.message || 'CV submitted successfully!'}`);
-
     } catch (error) {
       console.error('Submission error:', error);
+      
+      // Show error modal
+      this.showModal(
+        'error',
+        'Submission Failed',
+        error.message || 'Failed to submit CV. Please try again.'
+      );
       
       this.setState({
         isLoading: false,
         submitStatus: 'error',
         submitMessage: error.message || 'Failed to submit CV. Please try again.'
       });
-
-      alert(`❌ ${error.message || 'Failed to submit CV. Please try again.'}`);
     }
+  };
+
+  showModal = (type, title, message, details = null) => {
+    this.setState({
+      showModal: true,
+      modalType: type,
+      modalTitle: title,
+      modalMessage: message,
+      modalDetails: details
+    });
+
+    // Auto close modal after 5 seconds for success, 8 seconds for error
+    setTimeout(() => {
+      this.setState({ showModal: false });
+    }, type === 'success' ? 5000 : 8000);
+  };
+
+  closeModal = () => {
+    this.setState({ showModal: false });
   };
 
   render() {
@@ -169,9 +207,12 @@ class Request extends Component {
       windowWidth, 
       windowHeight,
       isLoading,
-      submitStatus,
-      submitMessage,
-      errors
+      errors,
+      showModal,
+      modalType,
+      modalTitle,
+      modalMessage,
+      modalDetails
     } = this.state;
 
     return (
@@ -186,6 +227,50 @@ class Request extends Component {
           />
         )}
         
+        {/* Modal Popup */}
+        {showModal && (
+          <div style={styles.modalOverlay} onClick={this.closeModal}>
+            <div 
+              style={{
+                ...styles.modalContent,
+                borderTop: `5px solid ${modalType === 'success' ? '#52c41a' : '#ff4d4f'}`
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div style={styles.modalHeader}>
+                <span style={styles.modalIcon}>
+                  {modalType === 'success' ? '✅' : '❌'}
+                </span>
+                <h3 style={styles.modalTitle}>{modalTitle}</h3>
+                <button style={styles.modalClose} onClick={this.closeModal}>×</button>
+              </div>
+              
+              <div style={styles.modalBody}>
+                <p style={styles.modalMessage}>{modalMessage}</p>
+                
+                {modalDetails && (
+                  <div style={styles.modalDetails}>
+                    {modalDetails.submission_date && (
+                      <div style={styles.detailItem}>
+                        <strong>Date:</strong> {new Date(modalDetails.submission_date).toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              
+              <div style={styles.modalFooter}>
+                <button 
+                  style={styles.modalButton}
+                  onClick={this.closeModal}
+                >
+                  {modalType === 'success' ? 'Great!' : 'Close'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={styles.animatedBackground}>
           {/* Animated background elements */}
           <div style={styles.gradientBg}></div>
@@ -212,22 +297,6 @@ class Request extends Component {
           <div style={styles.floatingShape3}></div>
           
           <div style={styles.container}>
-            {/* Status Message */}
-            {submitStatus && (
-              <div style={{
-                ...styles.statusMessage,
-                backgroundColor: submitStatus === 'success' ? '#d4edda' : '#f8d7da',
-                color: submitStatus === 'success' ? '#155724' : '#721c24',
-                border: `1px solid ${submitStatus === 'success' ? '#c3e6cb' : '#f5c6cb'}`
-              }}>
-                {submitMessage}
-                {this.state.responseData && this.state.responseData.id && (
-                  <div style={styles.responseId}>
-                    Reference ID: {this.state.responseData.id}
-                  </div>
-                )}
-              </div>
-            )}
 
             <form onSubmit={this.handleSubmit} style={styles.form}>
               <h2 style={styles.title}>📄 CV Submission</h2>
@@ -244,12 +313,12 @@ class Request extends Component {
                   required 
                   style={{
                     ...styles.input,
-                    borderColor: errors.firstName ? '#f56565' : '#e0e0e0'
+                    borderColor: errors.first_name ? '#f56565' : '#e0e0e0'
                   }}
                   disabled={isLoading}
                 />
-                {errors.firstName && (
-                  <span style={styles.errorText}>{errors.firstName}</span>
+                {errors.first_name && (
+                  <span style={styles.errorText}>{errors.first_name}</span>
                 )}
               </div>
 
@@ -275,12 +344,12 @@ class Request extends Component {
                   required 
                   style={{
                     ...styles.input,
-                    borderColor: errors.lastName ? '#f56565' : '#e0e0e0'
+                    borderColor: errors.last_name ? '#f56565' : '#e0e0e0'
                   }}
                   disabled={isLoading}
                 />
-                {errors.lastName && (
-                  <span style={styles.errorText}>{errors.lastName}</span>
+                {errors.last_name && (
+                  <span style={styles.errorText}>{errors.last_name}</span>
                 )}
               </div>
 
@@ -316,21 +385,21 @@ class Request extends Component {
                   required 
                   style={{
                     ...styles.input,
-                    borderColor: errors.phone ? '#f56565' : '#e0e0e0'
+                    borderColor: errors.phone_number ? '#f56565' : '#e0e0e0'
                   }}
                   disabled={isLoading}
                 />
-                {errors.phone && (
-                  <span style={styles.errorText}>{errors.phone}</span>
+                {errors.phone_number && (
+                  <span style={styles.errorText}>{errors.phone_number}</span>
                 )}
               </div>
 
               {/* National ID (Optional) */}
               <div style={styles.inputGroup}>
-                <label style={styles.label}>National ID (Optional)</label>
+                <label style={styles.label}>National ID</label>
                 <input 
                   name="nationalId" 
-                  placeholder="Enter your National ID" 
+                  placeholder="Enter your National ID (optional)" 
                   style={styles.input}
                   disabled={isLoading}
                 />
@@ -338,16 +407,16 @@ class Request extends Component {
 
               {/* Fan Number (Optional) */}
               <div style={styles.inputGroup}>
-                <label style={styles.label}>Fan Number (Optional)</label>
+                <label style={styles.label}>Fan Number</label>
                 <input 
                   name="fanNumber" 
-                  placeholder="Enter your Fan number" 
+                  placeholder="Enter your Fan number (optional)" 
                   style={styles.input}
                   disabled={isLoading}
                 />
               </div>
 
-              {/* CV Upload */}
+              {/* CV Upload - Using cv_file field name for API */}
               <div style={styles.inputGroup}>
                 <label style={styles.label}>
                   Upload CV <span style={styles.required}>*</span>
@@ -359,13 +428,13 @@ class Request extends Component {
                   required 
                   style={{
                     ...styles.fileInput,
-                    borderColor: errors.cv ? '#f56565' : '#e0e0e0'
+                    borderColor: errors.cv_file ? '#f56565' : '#e0e0e0'
                   }}
                   disabled={isLoading}
                 />
-                <small style={styles.hint}>Supported: PDF, DOC, DOCX (Max 5MB)</small>
-                {errors.cv && (
-                  <span style={styles.errorText}>{errors.cv}</span>
+                <small style={styles.hint}>Supported: PDF, DOC, DOCX (Max 5MB) · Field: cv_file</small>
+                {errors.cv_file && (
+                  <span style={styles.errorText}>{errors.cv_file}</span>
                 )}
               </div>
 
@@ -394,10 +463,6 @@ class Request extends Component {
                 )}
               </button>
 
-              {/* API Endpoint Info (for testing) */}
-              <small style={styles.apiInfo}>
-                POST to /cv/submit · Returns {'{ id, message }'}
-              </small>
             </form>
           </div>
         </div>
@@ -476,20 +541,18 @@ const styles = {
     position: "relative",
     zIndex: 10,
     width: "100%",
-    maxWidth: "450px",
+    maxWidth: "500px",
   },
   form: {
-    background: "rgba(255, 255, 255, 0.95)",
+    background: "rgba(255, 255, 255, 0.98)",
     backdropFilter: "blur(10px)",
-    padding: "40px",
+    padding: "35px",
     borderRadius: "20px",
     width: "100%",
-    boxShadow: "0 20px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.1)",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.2)",
     display: "flex",
     flexDirection: "column",
-    gap: "15px",
-    transform: "translateY(0)",
-    transition: "transform 0.3s ease, box-shadow 0.3s ease",
+    gap: "12px",
     animation: "fadeInUp 0.6s ease-out"
   },
   title: {
@@ -503,7 +566,7 @@ const styles = {
     WebkitTextFillColor: "transparent"
   },
   subtitle: {
-    margin: "0 0 10px 0",
+    margin: "0 0 5px 0",
     color: "#666",
     fontSize: "14px",
     textAlign: "center"
@@ -511,10 +574,10 @@ const styles = {
   inputGroup: {
     display: "flex",
     flexDirection: "column",
-    gap: "5px"
+    gap: "4px"
   },
   label: {
-    fontSize: "14px",
+    fontSize: "13px",
     fontWeight: "600",
     color: "#555",
     marginLeft: "5px"
@@ -524,8 +587,8 @@ const styles = {
     marginLeft: "2px"
   },
   input: {
-    padding: "12px 15px",
-    borderRadius: "10px",
+    padding: "10px 12px",
+    borderRadius: "8px",
     border: "2px solid #e0e0e0",
     fontSize: "14px",
     transition: "all 0.3s ease",
@@ -534,8 +597,8 @@ const styles = {
     fontFamily: "inherit"
   },
   fileInput: {
-    padding: "10px",
-    borderRadius: "10px",
+    padding: "8px",
+    borderRadius: "8px",
     border: "2px dashed #e0e0e0",
     backgroundColor: "#f8f9fa",
     cursor: "pointer",
@@ -543,40 +606,37 @@ const styles = {
     fontFamily: "inherit"
   },
   hint: {
-    fontSize: "12px",
+    fontSize: "11px",
     color: "#999",
-    marginTop: "5px"
+    marginTop: "2px"
   },
   errorText: {
     color: "#f56565",
-    fontSize: "12px",
-    marginTop: "4px",
+    fontSize: "11px",
+    marginTop: "2px",
     marginLeft: "5px"
   },
   button: {
-    padding: "14px",
+    padding: "12px",
     background: "linear-gradient(45deg, #667eea, #764ba2)",
     color: "#fff",
     border: "none",
-    borderRadius: "10px",
+    borderRadius: "8px",
     cursor: "pointer",
     fontWeight: "bold",
-    fontSize: "16px",
-    marginTop: "10px",
+    fontSize: "15px",
+    marginTop: "8px",
     transition: "all 0.3s ease",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: "8px",
-    position: "relative",
-    overflow: "hidden"
+    gap: "8px"
   },
   buttonLoading: {
-    opacity: 0.7,
-    cursor: "not-allowed"
+    opacity: 0.7
   },
   buttonIcon: {
-    fontSize: "18px"
+    fontSize: "16px"
   },
   loader: {
     display: "flex",
@@ -589,25 +649,100 @@ const styles = {
     borderRadius: "50%",
     animation: "bounce 1.4s infinite ease-in-out both"
   },
-  statusMessage: {
-    padding: "12px 16px",
-    borderRadius: "10px",
-    marginBottom: "20px",
-    fontSize: "14px",
-    textAlign: "center",
-    animation: "fadeInUp 0.3s ease-out"
+
+  // Modal Styles
+  modalOverlay: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 9999,
+    animation: "fadeIn 0.3s ease-out",
+    backdropFilter: "blur(5px)"
   },
-  responseId: {
-    marginTop: "8px",
-    fontSize: "12px",
-    fontWeight: "bold"
+  modalContent: {
+    backgroundColor: "white",
+    borderRadius: "12px",
+    width: "90%",
+    maxWidth: "450px",
+    boxShadow: "0 20px 60px rgba(0, 0, 0, 0.3)",
+    animation: "slideUp 0.4s ease-out",
+    overflow: "hidden"
   },
-  apiInfo: {
-    display: "block",
-    textAlign: "center",
-    fontSize: "11px",
+  modalHeader: {
+    padding: "20px",
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    borderBottom: "1px solid #e0e0e0",
+    position: "relative"
+  },
+  modalIcon: {
+    fontSize: "28px"
+  },
+  modalTitle: {
+    margin: 0,
+    fontSize: "18px",
+    fontWeight: "600",
+    color: "#333",
+    flex: 1
+  },
+  modalClose: {
+    background: "none",
+    border: "none",
+    fontSize: "28px",
+    cursor: "pointer",
     color: "#999",
+    padding: "0",
+    width: "30px",
+    height: "30px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "50%",
+    transition: "all 0.3s ease"
+  },
+  modalBody: {
+    padding: "20px"
+  },
+  modalMessage: {
+    margin: "0 0 15px 0",
+    fontSize: "15px",
+    color: "#555",
+    lineHeight: "1.5"
+  },
+  modalDetails: {
+    backgroundColor: "#f8f9fa",
+    padding: "15px",
+    borderRadius: "8px",
     marginTop: "10px"
+  },
+  detailItem: {
+    fontSize: "13px",
+    color: "#666",
+    marginBottom: "5px"
+  },
+  modalFooter: {
+    padding: "15px 20px",
+    borderTop: "1px solid #e0e0e0",
+    display: "flex",
+    justifyContent: "flex-end"
+  },
+  modalButton: {
+    padding: "8px 24px",
+    background: "linear-gradient(45deg, #667eea, #764ba2)",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontWeight: "500",
+    fontSize: "14px",
+    transition: "all 0.3s ease"
   }
 };
 
@@ -644,7 +779,7 @@ style.textContent = `
   @keyframes fadeInUp {
     from {
       opacity: 0;
-      transform: translateY(30px);
+      transform: translateY(20px);
     }
     to {
       opacity: 1;
@@ -655,6 +790,22 @@ style.textContent = `
   @keyframes bounce {
     0%, 80%, 100% { transform: scale(0); }
     40% { transform: scale(1); }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(50px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   input:focus {
@@ -669,11 +820,17 @@ style.textContent = `
 
   button:hover:not(:disabled) {
     transform: translateY(-2px);
-    box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
   }
 
-  button:active:not(:disabled) {
-    transform: translateY(0);
+  .modalClose:hover {
+    background-color: #f0f0f0;
+    color: #333;
+  }
+
+  .modalButton:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
   }
 
   .loaderDot:nth-child(1) { animation-delay: -0.32s; }

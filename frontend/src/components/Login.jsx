@@ -1,5 +1,6 @@
 import React, { Component } from "react";
 import Confetti from 'react-confetti';
+// Remove this line: import { withAuth } from '../context/AuthContext';
 
 class Login extends Component {
     state = {
@@ -15,7 +16,6 @@ class Login extends Component {
     componentDidMount() {
         window.addEventListener('resize', this.handleResize);
 
-        // Check if user was previously remembered
         const savedUsername = localStorage.getItem('rememberedUsername');
         if (savedUsername) {
             this.setState({ rememberMe: true });
@@ -86,8 +86,8 @@ class Login extends Component {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                    username: username,     // backend expects "username"
-                    password: password,      // backend expects "password"
+                    username: username,
+                    password: password,
                 }),
             });
 
@@ -99,7 +99,7 @@ class Login extends Component {
             const data = await res.json();
             console.log("Login success:", data);
 
-            // Save token
+            // Save token directly to localStorage
             localStorage.setItem("access_token", data.access_token);
             localStorage.setItem("token_type", data.token_type);
             localStorage.setItem("expires_in", data.expires_in);
@@ -115,26 +115,15 @@ class Login extends Component {
 
             setTimeout(() => {
                 this.setState({ showConfetti: false });
-            }, 4000);
-
-            window.location.href = "/dashboard";
+                // Use window.location.href for redirect
+                window.location.href = "/dashboard";
+            }, 2000);
 
         } catch (err) {
             console.error(err);
             this.setState({ isLoading: false });
             alert("❌ " + err.message);
         }
-    };
-
-    handleSocialLogin = (provider) => {
-        this.setState({ isLoading: true });
-
-        // Simulate social login
-        setTimeout(() => {
-            this.setState({ isLoading: false });
-            console.log(`Login with ${provider}`);
-            alert(`Login with ${provider} - This would connect to ${provider} OAuth`);
-        }, 1000);
     };
 
     render() {
@@ -452,39 +441,6 @@ const styles = {
         marginTop: "4px",
         marginLeft: "5px"
     },
-    row: {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center"
-    },
-    checkboxLabel: {
-        display: "flex",
-        alignItems: "center",
-        gap: "8px",
-        cursor: "pointer"
-    },
-    checkbox: {
-        width: "16px",
-        height: "16px",
-        cursor: "pointer",
-        accentColor: "#667eea"
-    },
-    checkboxText: {
-        fontSize: "14px",
-        color: "#666"
-    },
-    forgotLink: {
-        background: "none",
-        border: "none",
-        color: "#667eea",
-        fontSize: "14px",
-        cursor: "pointer",
-        fontWeight: "500",
-        textDecoration: "none",
-        ":hover": {
-            textDecoration: "underline"
-        }
-    },
     button: {
         padding: "14px",
         background: "linear-gradient(45deg, #667eea, #764ba2)",
@@ -518,76 +474,7 @@ const styles = {
         height: "6px",
         backgroundColor: "white",
         borderRadius: "50%",
-        animation: "bounce 1.4s infinite ease-in-out both",
-        ":nth-child(1)": {
-            animationDelay: "-0.32s"
-        },
-        ":nth-child(2)": {
-            animationDelay: "-0.16s"
-        }
-    },
-    divider: {
-        display: "flex",
-        alignItems: "center",
-        gap: "10px",
-        margin: "10px 0"
-    },
-    dividerLine: {
-        flex: 1,
-        height: "1px",
-        backgroundColor: "#e0e0e0"
-    },
-    dividerText: {
-        fontSize: "13px",
-        color: "#999",
-        textTransform: "uppercase"
-    },
-    socialContainer: {
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        gap: "10px"
-    },
-    socialButton: {
-        padding: "12px",
-        background: "white",
-        border: "2px solid #e0e0e0",
-        borderRadius: "10px",
-        cursor: "pointer",
-        fontSize: "14px",
-        fontWeight: "500",
-        color: "#555",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: "8px",
-        transition: "all 0.3s ease",
-        ":hover": {
-            borderColor: "#667eea",
-            backgroundColor: "#f8f9ff"
-        }
-    },
-    socialIcon: {
-        fontSize: "16px",
-        fontWeight: "bold",
-        color: "#667eea"
-    },
-    signupText: {
-        textAlign: "center",
-        fontSize: "14px",
-        color: "#666",
-        marginTop: "10px"
-    },
-    signupLink: {
-        background: "none",
-        border: "none",
-        color: "#667eea",
-        fontWeight: "600",
-        cursor: "pointer",
-        fontSize: "14px",
-        textDecoration: "none",
-        ":hover": {
-            textDecoration: "underline"
-        }
+        animation: "bounce 1.4s infinite ease-in-out both"
     }
 };
 
@@ -656,4 +543,9 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
+// Remove these lines at the bottom:
+// export const withAuth = (WrappedComponent) => { ... };
+// export default withAuth(Login);
+
+// Just export the component directly:
 export default Login;
