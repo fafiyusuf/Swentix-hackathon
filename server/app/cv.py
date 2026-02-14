@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse
 
 import app.db as db_module
@@ -13,6 +13,9 @@ from app.config import REQUESTS_COLLECTION, CV_FILES_DIR
 from app.schemas import Stats, StatusUpdate
 
 router = APIRouter(prefix="/api/v1", tags=["Recruitment"])
+
+from nodes.graph_builder import run_cv_graph
+from bson import ObjectId
 
 def _serialize_doc(doc: dict) -> dict:
     """Helper to convert MongoDB _id to string 'id'."""
@@ -39,7 +42,8 @@ async def submit_cv(
     phone_number: str = Form(...),
     national_id: str = Form(None),
     fan_number: str = Form(None),
-    cv_file: UploadFile = File(...)
+    cv_file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None
 ):
     """
     Handles candidate CV submission. 
@@ -55,6 +59,7 @@ async def submit_cv(
     # Create unique filename
     unique_name = f"{uuid.uuid4().hex}{ext}"
     file_path = os.path.join(CV_FILES_DIR, unique_name)
+    abs_path = os.path.abspath(file_path)
 
     # Save file using chunked reading for memory efficiency
     try:
@@ -86,6 +91,35 @@ async def submit_cv(
         if os.path.exists(file_path):
             os.remove(file_path)
         raise HTTPException(status_code=500, detail="Database insertion failed")
+
+    def _process_and_persist(path: str, cand_id: ObjectId):
+        try:
+            result = run_cv_graph(path)
+        except Exception as e:
+            result = {"error": str(e)}
+        # Print results so they appear in server logs
+        try:
+            print(f"[graph] Candidate {cand_id} processed. Result:\n{result}")
+        except Exception:
+            pass
+        try:
+            db_module.db[REQUESTS_COLLECTION].update_one(
+                {"_id": cand_id},
+                {"$set": {"graph_results": result, "processed_at": datetime.now(timezone.utc)}}
+            )
+        except Exception:
+            # swallow DB persistence errors to avoid crashing background task
+            pass
+
+    # Schedule graph processing in background so upload response is fast
+    try:
+        if background_tasks is not None:
+            background_tasks.add_task(_process_and_persist, abs_path, res.inserted_id)
+        else:
+            _process_and_persist(abs_path, res.inserted_id)
+    except Exception:
+        # Do not block the response on graph processing failure
+        pass
 
     return {"message": "Application received successfully", "id": str(res.inserted_id)}
 
