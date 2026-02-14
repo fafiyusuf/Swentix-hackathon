@@ -5,8 +5,14 @@ import TaskBar from '../../components/taskbar'
 const Dashboard = () => {
   return (
     <div>
-      <NavigationBar />
-      <TaskBar />
+      <div>
+        <TaskBar />
+      </div>
+      <div>
+        <NavigationBar />
+
+      </div>
+
 
       <h2>Dashboard</h2>
     </div>

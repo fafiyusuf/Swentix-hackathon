@@ -5,11 +5,15 @@ class Request extends Component {
   state = {
     showConfetti: false,
     windowWidth: window.innerWidth,
-    windowHeight: window.innerHeight
+    windowHeight: window.innerHeight,
+    isLoading: false,
+    submitStatus: null,
+    submitMessage: '',
+    responseData: null,
+    errors: {}
   };
 
   componentDidMount() {
-    // Update window dimensions on resize
     window.addEventListener('resize', this.handleResize);
   }
 
@@ -24,60 +28,151 @@ class Request extends Component {
     });
   };
 
-  handleSubmit = (e) => {
+  validateForm = (formData, cvFile) => {
+    const errors = {};
+    
+    // if (!formData.firstName) errors.firstName = 'First name is required';
+    // if (!formData.lastName) errors.lastName = 'Last name is required';
+    // if (!formData.email) {
+    //   errors.email = 'Email is required';
+    // } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+    //   errors.email = 'Email is invalid';
+    // }
+    // if (!formData.phone) errors.phone = 'Phone number is required';
+    
+    return errors;
+  };
+
+  handleSubmit = async (e) => {
     e.preventDefault();
 
     const form = e.target;
+    
+    // Get form values
+    const formData = {
+      first_name: form.firstName.value,
+      middle_name: form.middleName.value || '', // Optional
+      last_name: form.lastName.value,
+      email: form.email.value,
+      phone_number: form.phone.value,
+      national_id: form.nationalId.value || '', // Optional
+      fan_number: form.fanNumber?.value || '' // Optional
+    };
 
     // Validate file
     const cvFile = form.cv.files[0];
-    if (!cvFile) {
-      alert("Please upload your CV");
-      return;
-    }
-
-    // Validate file size (max 5MB)
-    if (cvFile.size > 5 * 1024 * 1024) {
-      alert("File size must be less than 5MB");
-      return;
-    }
-
-    // Validate file type
-    const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-    if (!validTypes.includes(cvFile.type)) {
-      alert("Please upload PDF or Word documents only");
-      return;
-    }
-
-    const data = {
-      firstName: form.firstName.value,
-      middleName: form.middleName.value,
-      lastName: form.lastName.value,
-      email: form.email.value,
-      phone: form.phone.value,
-      nationalId: form.nationalId.value,
-      cv: cvFile,
-    };
-
-    console.log("Form Data:", {
-      ...data,
-      cv: data.cv.name
-    });
-
-    // Show confetti
-    this.setState({ showConfetti: true });
     
-    // Hide confetti after 5 seconds
-    setTimeout(() => {
-      this.setState({ showConfetti: false });
-    }, 5000);
+    // Validate form
+    const errors = this.validateForm(formData, cvFile);
+    
+    if (!cvFile) {
+      errors.cv = "Please upload your CV";
+    } else {
+      // Validate file size (max 5MB)
+      if (cvFile.size > 5 * 1024 * 1024) {
+        errors.cv = "File size must be less than 5MB";
+      }
+      
+      // Validate file type
+      const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+      if (!validTypes.includes(cvFile.type)) {
+        errors.cv = "Please upload PDF or Word documents only";
+      }
+    }
 
-    alert("🎉 CV submitted successfully!");
-    form.reset();
+    // If there are errors, show them and stop submission
+    if (Object.keys(errors).length > 0) {
+      this.setState({ errors });
+      
+      // Show first error as alert
+      const firstError = Object.values(errors)[0];
+      alert(firstError);
+      return;
+    }
+
+    // Clear errors and set loading state
+    this.setState({ errors: {}, isLoading: true, submitStatus: null });
+
+    try {
+      // Create FormData for multipart/form-data
+      const apiFormData = new FormData();
+      
+      // Append all fields
+      apiFormData.append('first_name', formData.first_name);
+      apiFormData.append('middle_name', formData.middle_name);
+      apiFormData.append('last_name', formData.last_name);
+      apiFormData.append('email', formData.email);
+      apiFormData.append('phone_number', formData.phone_number);
+      
+      if (formData.national_id) {
+        apiFormData.append('national_id', formData.national_id);
+      }
+      
+      if (formData.fan_number) {
+        apiFormData.append('fan_number', formData.fan_number);
+      }
+      
+      // Append the CV file
+      apiFormData.append('cv', cvFile);
+
+      // Make API call
+      const response = await fetch('http://127.0.0.1:8000/cv/submit', {
+        method: 'POST',
+        body: apiFormData
+        // Don't set Content-Type header - browser will set it with boundary
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        throw new Error(responseData.message || 'Submission failed');
+      }
+
+      // Successful submission
+      console.log('API Response:', responseData);
+      
+      this.setState({
+        showConfetti: true,
+        isLoading: false,
+        submitStatus: 'success',
+        submitMessage: responseData.message || 'CV submitted successfully!',
+        responseData: responseData
+      });
+
+      // Reset form
+      form.reset();
+      
+      // Hide confetti after 5 seconds
+      setTimeout(() => {
+        this.setState({ showConfetti: false });
+      }, 5000);
+
+      // Show success message
+      alert(`✅ ${responseData.message || 'CV submitted successfully!'}`);
+
+    } catch (error) {
+      console.error('Submission error:', error);
+      
+      this.setState({
+        isLoading: false,
+        submitStatus: 'error',
+        submitMessage: error.message || 'Failed to submit CV. Please try again.'
+      });
+
+      alert(`❌ ${error.message || 'Failed to submit CV. Please try again.'}`);
+    }
   };
 
   render() {
-    const { showConfetti, windowWidth, windowHeight } = this.state;
+    const { 
+      showConfetti, 
+      windowWidth, 
+      windowHeight,
+      isLoading,
+      submitStatus,
+      submitMessage,
+      errors
+    } = this.state;
 
     return (
       <>
@@ -117,86 +212,192 @@ class Request extends Component {
           <div style={styles.floatingShape3}></div>
           
           <div style={styles.container}>
+            {/* Status Message */}
+            {submitStatus && (
+              <div style={{
+                ...styles.statusMessage,
+                backgroundColor: submitStatus === 'success' ? '#d4edda' : '#f8d7da',
+                color: submitStatus === 'success' ? '#155724' : '#721c24',
+                border: `1px solid ${submitStatus === 'success' ? '#c3e6cb' : '#f5c6cb'}`
+              }}>
+                {submitMessage}
+                {this.state.responseData && this.state.responseData.id && (
+                  <div style={styles.responseId}>
+                    Reference ID: {this.state.responseData.id}
+                  </div>
+                )}
+              </div>
+            )}
+
             <form onSubmit={this.handleSubmit} style={styles.form}>
               <h2 style={styles.title}>📄 CV Submission</h2>
               <p style={styles.subtitle}>Fill in your details and upload your CV</p>
 
+              {/* First Name */}
               <div style={styles.inputGroup}>
-                <label style={styles.label}>First Name *</label>
+                <label style={styles.label}>
+                  First Name <span style={styles.required}>*</span>
+                </label>
                 <input 
                   name="firstName" 
                   placeholder="Enter your first name" 
                   required 
-                  style={styles.input}
+                  style={{
+                    ...styles.input,
+                    borderColor: errors.firstName ? '#f56565' : '#e0e0e0'
+                  }}
+                  disabled={isLoading}
                 />
+                {errors.firstName && (
+                  <span style={styles.errorText}>{errors.firstName}</span>
+                )}
               </div>
 
+              {/* Middle Name (Optional) */}
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Middle Name</label>
                 <input 
                   name="middleName" 
-                  placeholder="Enter your middle name" 
+                  placeholder="Enter your middle name (optional)" 
                   style={styles.input}
+                  disabled={isLoading}
                 />
               </div>
 
+              {/* Last Name */}
               <div style={styles.inputGroup}>
-                <label style={styles.label}>Last Name *</label>
+                <label style={styles.label}>
+                  Last Name <span style={styles.required}>*</span>
+                </label>
                 <input 
                   name="lastName" 
                   placeholder="Enter your last name" 
                   required 
-                  style={styles.input}
+                  style={{
+                    ...styles.input,
+                    borderColor: errors.lastName ? '#f56565' : '#e0e0e0'
+                  }}
+                  disabled={isLoading}
                 />
+                {errors.lastName && (
+                  <span style={styles.errorText}>{errors.lastName}</span>
+                )}
               </div>
 
+              {/* Email */}
               <div style={styles.inputGroup}>
-                <label style={styles.label}>Email *</label>
+                <label style={styles.label}>
+                  Email <span style={styles.required}>*</span>
+                </label>
                 <input 
                   name="email" 
                   type="email" 
                   placeholder="your.email@example.com" 
                   required 
-                  style={styles.input}
+                  style={{
+                    ...styles.input,
+                    borderColor: errors.email ? '#f56565' : '#e0e0e0'
+                  }}
+                  disabled={isLoading}
                 />
+                {errors.email && (
+                  <span style={styles.errorText}>{errors.email}</span>
+                )}
               </div>
 
+              {/* Phone Number */}
               <div style={styles.inputGroup}>
-                <label style={styles.label}>Phone Number *</label>
+                <label style={styles.label}>
+                  Phone Number <span style={styles.required}>*</span>
+                </label>
                 <input 
                   name="phone" 
                   placeholder="+250 788 123 456" 
                   required 
-                  style={styles.input}
+                  style={{
+                    ...styles.input,
+                    borderColor: errors.phone ? '#f56565' : '#e0e0e0'
+                  }}
+                  disabled={isLoading}
                 />
+                {errors.phone && (
+                  <span style={styles.errorText}>{errors.phone}</span>
+                )}
               </div>
 
+              {/* National ID (Optional) */}
               <div style={styles.inputGroup}>
-                <label style={styles.label}>National ID / FAN Number *</label>
+                <label style={styles.label}>National ID (Optional)</label>
                 <input 
                   name="nationalId" 
-                  placeholder="Enter your National ID or FAN number" 
-                  required 
+                  placeholder="Enter your National ID" 
                   style={styles.input}
+                  disabled={isLoading}
                 />
               </div>
 
+              {/* Fan Number (Optional) */}
               <div style={styles.inputGroup}>
-                <label style={styles.label}>Upload CV *</label>
+                <label style={styles.label}>Fan Number (Optional)</label>
+                <input 
+                  name="fanNumber" 
+                  placeholder="Enter your Fan number" 
+                  style={styles.input}
+                  disabled={isLoading}
+                />
+              </div>
+
+              {/* CV Upload */}
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>
+                  Upload CV <span style={styles.required}>*</span>
+                </label>
                 <input 
                   name="cv" 
                   type="file" 
-                  accept=".pdf,.doc,.docx" 
+                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" 
                   required 
-                  style={styles.fileInput}
+                  style={{
+                    ...styles.fileInput,
+                    borderColor: errors.cv ? '#f56565' : '#e0e0e0'
+                  }}
+                  disabled={isLoading}
                 />
                 <small style={styles.hint}>Supported: PDF, DOC, DOCX (Max 5MB)</small>
+                {errors.cv && (
+                  <span style={styles.errorText}>{errors.cv}</span>
+                )}
               </div>
 
-              <button type="submit" style={styles.button}>
-                <span style={styles.buttonIcon}>📤</span>
-                Submit Application
+              {/* Submit Button */}
+              <button 
+                type="submit" 
+                style={{
+                  ...styles.button,
+                  ...(isLoading && styles.buttonLoading),
+                  opacity: isLoading ? 0.7 : 1,
+                  cursor: isLoading ? 'not-allowed' : 'pointer'
+                }}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <span style={styles.loader}>
+                    <span style={styles.loaderDot}></span>
+                    <span style={styles.loaderDot}></span>
+                    <span style={styles.loaderDot}></span>
+                  </span>
+                ) : (
+                  <>
+                    <span style={styles.buttonIcon}>📤</span>
+                    Submit Application
+                  </>
+                )}
               </button>
+
+              {/* API Endpoint Info (for testing) */}
+              <small style={styles.apiInfo}>
+                POST to /cv/submit · Returns {'{ id, message }'}
+              </small>
             </form>
           </div>
         </div>
@@ -318,6 +519,10 @@ const styles = {
     color: "#555",
     marginLeft: "5px"
   },
+  required: {
+    color: "#f56565",
+    marginLeft: "2px"
+  },
   input: {
     padding: "12px 15px",
     borderRadius: "10px",
@@ -326,11 +531,7 @@ const styles = {
     transition: "all 0.3s ease",
     outline: "none",
     backgroundColor: "white",
-    ":focus": {
-      borderColor: "#667eea",
-      boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)",
-      transform: "scale(1.02)"
-    }
+    fontFamily: "inherit"
   },
   fileInput: {
     padding: "10px",
@@ -339,15 +540,18 @@ const styles = {
     backgroundColor: "#f8f9fa",
     cursor: "pointer",
     transition: "all 0.3s ease",
-    ":hover": {
-      borderColor: "#667eea",
-      backgroundColor: "#f0f3ff"
-    }
+    fontFamily: "inherit"
   },
   hint: {
     fontSize: "12px",
     color: "#999",
     marginTop: "5px"
+  },
+  errorText: {
+    color: "#f56565",
+    fontSize: "12px",
+    marginTop: "4px",
+    marginLeft: "5px"
   },
   button: {
     padding: "14px",
@@ -365,21 +569,49 @@ const styles = {
     justifyContent: "center",
     gap: "8px",
     position: "relative",
-    overflow: "hidden",
-    ":hover": {
-      transform: "translateY(-2px)",
-      boxShadow: "0 10px 25px rgba(102, 126, 234, 0.4)"
-    },
-    ":active": {
-      transform: "translateY(0)"
-    }
+    overflow: "hidden"
+  },
+  buttonLoading: {
+    opacity: 0.7,
+    cursor: "not-allowed"
   },
   buttonIcon: {
     fontSize: "18px"
+  },
+  loader: {
+    display: "flex",
+    gap: "4px"
+  },
+  loaderDot: {
+    width: "6px",
+    height: "6px",
+    backgroundColor: "white",
+    borderRadius: "50%",
+    animation: "bounce 1.4s infinite ease-in-out both"
+  },
+  statusMessage: {
+    padding: "12px 16px",
+    borderRadius: "10px",
+    marginBottom: "20px",
+    fontSize: "14px",
+    textAlign: "center",
+    animation: "fadeInUp 0.3s ease-out"
+  },
+  responseId: {
+    marginTop: "8px",
+    fontSize: "12px",
+    fontWeight: "bold"
+  },
+  apiInfo: {
+    display: "block",
+    textAlign: "center",
+    fontSize: "11px",
+    color: "#999",
+    marginTop: "10px"
   }
 };
 
-// Add keyframe animations to document
+// Add keyframe animations
 const style = document.createElement('style');
 style.textContent = `
   @keyframes gradientBG {
@@ -420,10 +652,14 @@ style.textContent = `
     }
   }
 
+  @keyframes bounce {
+    0%, 80%, 100% { transform: scale(0); }
+    40% { transform: scale(1); }
+  }
+
   input:focus {
     border-color: #667eea !important;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
-    transform: scale(1.02);
   }
 
   input[type="file"]:hover {
@@ -431,14 +667,17 @@ style.textContent = `
     background-color: #f0f3ff !important;
   }
 
-  button:hover {
+  button:hover:not(:disabled) {
     transform: translateY(-2px);
     box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
   }
 
-  button:active {
+  button:active:not(:disabled) {
     transform: translateY(0);
   }
+
+  .loaderDot:nth-child(1) { animation-delay: -0.32s; }
+  .loaderDot:nth-child(2) { animation-delay: -0.16s; }
 `;
 document.head.appendChild(style);
 

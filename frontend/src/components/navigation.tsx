@@ -2,7 +2,11 @@ import React from 'react'
 
 const navigation = () => {
   return (
-    <div>navigation</div>
+    <div>
+        <div style={{background:'#874663'}}>
+            navigation
+        </div>
+    </div>
   )
 }
 
