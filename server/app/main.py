@@ -9,9 +9,18 @@ from app.cv import router as cv_router
 from app.api_v1 import router as api_v1_router
 from app.config import REQUESTS_COLLECTION, CV_FILES_DIR
 import app.db as db_module
+from fastapi.middleware.cors import CORSMiddleware
+
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def _check_mongo_connection():
     try:
