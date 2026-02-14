@@ -3,22 +3,27 @@ import React, { Component } from "react";
 class Dashboard extends Component {
   state = {
     // User info
-    userEmail: localStorage.getItem('userEmail') || 'admin@example.com',
+    userEmail: localStorage.getItem('userEmail') || 
+               localStorage.getItem('username') || 
+               'Admin User',
     
     // Sidebar state
     sidebarCollapsed: false,
     activePage: 'dashboard',
     
-    // Dashboard data
+    // Dashboard data - using correct field names from API
     stats: {
-      total_candidates: 0,
-      pending_reviews: 0,
+      total_requests: 0,
       approved: 0,
-      rejected: 0
+      rejected: 0,
+      pending: 0
     },
     candidates: [],
     graphData: null,
     selectedCandidate: null,
+    
+    // Filter state for candidates
+    statusFilter: null, // 'approved', 'rejected', 'pending', or null for all
     
     // UI states
     isLoading: false,
@@ -29,14 +34,25 @@ class Dashboard extends Component {
     showStatusModal: false,
     selectedCandidateId: null,
     selectedStatus: '',
-    statusUpdateLoading: false
+    statusUpdateLoading: false,
+
+    // API loading states
+    statsLoading: true,
+    candidatesLoading: true,
+    graphLoading: true,
+
+    // Pagination
+    limit: 50,
+    skip: 0,
+    hasMore: true
   };
 
   componentDidMount() {
-    // Check if user is logged in
-    const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
-    if (!isLoggedIn) {
-      window.location.href = '/';
+    // Check if user is logged in using token
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      window.location.href = '/login';
+      return;
     }
 
     // Update time every second
@@ -44,7 +60,7 @@ class Dashboard extends Component {
       this.setState({ currentTime: new Date().toLocaleTimeString() });
     }, 1000);
 
-    // Load initial data
+    // Load initial data with token
     this.fetchDashboardStats();
     this.fetchCandidates();
     this.fetchGraphData();
@@ -54,52 +70,155 @@ class Dashboard extends Component {
     clearInterval(this.timer);
   }
 
-  // API Calls
+  // Helper to get auth headers
+  getAuthHeaders = () => {
+    const token = localStorage.getItem('access_token');
+    return {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    };
+  };
+
+  // API Calls with authentication
   fetchDashboardStats = async () => {
+    this.setState({ statsLoading: true });
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/v1/dashboard/stats');
+      const response = await fetch('http://127.0.0.1:8000/api/v1/dashboard/stats', {
+        headers: this.getAuthHeaders()
+      });
+      
+      if (response.status === 401) {
+        this.handleLogout();
+        return;
+      }
+
       const data = await response.json();
-      this.setState({ stats: data });
+      console.log('Stats data:', data); // Debug log
+      this.setState({ stats: data, statsLoading: false });
     } catch (error) {
       console.error('Error fetching stats:', error);
+      this.setState({ statsLoading: false });
     }
   };
 
-  fetchCandidates = async () => {
-    this.setState({ isLoading: true });
+  fetchCandidates = async (reset = true) => {
+    const { statusFilter, limit, skip } = this.state;
+    
+    if (reset) {
+      this.setState({ candidatesLoading: true, skip: 0, candidates: [] });
+    } else {
+      this.setState({ candidatesLoading: true });
+    }
+
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/v1/candidates');
+      // Build URL with query parameters
+      let url = 'http://127.0.0.1:8000/api/v1/candidates?';
+      const params = [];
+      
+      if (statusFilter) {
+        params.push(`status=${statusFilter}`);
+      }
+      
+      params.push(`limit=${limit}`);
+      params.push(`skip=${reset ? 0 : skip}`);
+      
+      url += params.join('&');
+
+      const response = await fetch(url, {
+        headers: this.getAuthHeaders()
+      });
+
+      if (response.status === 401) {
+        this.handleLogout();
+        return;
+      }
+
       const data = await response.json();
-      this.setState({ candidates: data, isLoading: false });
+      console.log('Candidates data:', data); // Debug log
+
+      // Check if data is an array (as per API spec, it returns a string? Let's handle both)
+      let candidatesData = [];
+      if (Array.isArray(data)) {
+        candidatesData = data;
+      } else if (typeof data === 'string') {
+        // If it's a string, maybe it's JSON string
+        try {
+          candidatesData = JSON.parse(data);
+        } catch {
+          candidatesData = [];
+        }
+      }
+
+      this.setState(prevState => ({
+        candidates: reset ? candidatesData : [...prevState.candidates, ...candidatesData],
+        candidatesLoading: false,
+        hasMore: candidatesData.length === limit,
+        skip: reset ? limit : prevState.skip + limit
+      }));
     } catch (error) {
       console.error('Error fetching candidates:', error);
-      this.setState({ isLoading: false });
+      this.setState({ candidatesLoading: false });
     }
   };
 
   fetchGraphData = async () => {
+    this.setState({ graphLoading: true });
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/v1/dashboard/graph');
+      const response = await fetch('http://127.0.0.1:8000/api/v1/dashboard/graph', {
+        headers: this.getAuthHeaders()
+      });
+
+      if (response.status === 401) {
+        this.handleLogout();
+        return;
+      }
+
       const data = await response.json();
-      this.setState({ graphData: data });
+      console.log('Graph data:', data); // Debug log
+      this.setState({ graphData: data, graphLoading: false });
     } catch (error) {
       console.error('Error fetching graph data:', error);
+      this.setState({ graphLoading: false });
     }
   };
 
-  fetchCandidateDetails = async (candidateId) => {
-    try {
-      const response = await fetch(`http://127.0.0.1:8000/api/v1/candidates/${candidateId}`);
-      const data = await response.json();
-      this.setState({ selectedCandidate: data });
-    } catch (error) {
-      console.error('Error fetching candidate details:', error);
+fetchCandidateDetails = async (candidateId) => {
+  try {
+    const response = await fetch(`http://127.0.0.1:8000/api/v1/candidates/${candidateId}`, {
+      headers: this.getAuthHeaders()
+    });
+
+    if (response.status === 401) {
+      this.handleLogout();
+      return;
     }
-  };
+
+    const data = await response.json();
+    console.log('Candidate details:', data);
+    
+    // The data might be nested or direct - check the structure
+    // Based on your data, it might return something like:
+    // { candidate: {...}, status: "...", cv_path: "...", ... }
+    this.setState({ selectedCandidate: data });
+  } catch (error) {
+    console.error('Error fetching candidate details:', error);
+  }
+};
 
   downloadCV = async (candidateId) => {
     try {
-      const response = await fetch(`http://127.0.0.1:8000/api/v1/candidates/${candidateId}/download`);
+      const token = localStorage.getItem('access_token');
+      const response = await fetch(`http://127.0.0.1:8000/api/v1/candidates/${candidateId}/download`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.status === 401) {
+        this.handleLogout();
+        return;
+      }
+
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -108,6 +227,7 @@ class Dashboard extends Component {
       document.body.appendChild(a);
       a.click();
       a.remove();
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error downloading CV:', error);
       alert('Failed to download CV');
@@ -122,32 +242,64 @@ class Dashboard extends Component {
     try {
       const response = await fetch(`http://127.0.0.1:8000/api/v1/candidates/${selectedCandidateId}/status`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: this.getAuthHeaders(),
         body: JSON.stringify({ status: selectedStatus })
       });
 
+      if (response.status === 401) {
+        this.handleLogout();
+        return;
+      }
+
       if (response.ok) {
-        // Refresh candidates list
-        this.fetchCandidates();
+        // Refresh data
+        await this.fetchDashboardStats();
+        await this.fetchCandidates(true);
+        
+        // Clear selected candidate if it was the one updated
+        if (this.state.selectedCandidate?.id === selectedCandidateId) {
+          this.setState({ selectedCandidate: null });
+        }
+        
         this.setState({ showStatusModal: false, statusUpdateLoading: false });
-        alert('Status updated successfully!');
+        this.showNotification('Status updated successfully!', 'success');
       } else {
         throw new Error('Failed to update status');
       }
     } catch (error) {
       console.error('Error updating status:', error);
-      alert('Failed to update status');
+      this.showNotification('Failed to update status', 'error');
       this.setState({ statusUpdateLoading: false });
     }
   };
 
+  // Filter handlers
+  handleStatusFilter = (status) => {
+    this.setState({ statusFilter: status }, () => {
+      this.fetchCandidates(true);
+    });
+  };
+
+  loadMore = () => {
+    if (this.state.hasMore && !this.state.candidatesLoading) {
+      this.fetchCandidates(false);
+    }
+  };
+
+  // Show notification
+  showNotification = (message, type = 'success') => {
+    alert(`${type === 'success' ? '✅' : '❌'} ${message}`);
+  };
+
   // Handlers
   handleLogout = () => {
-    localStorage.removeItem('isLoggedIn');
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('token_type');
+    localStorage.removeItem('expires_in');
+    localStorage.removeItem('username');
     localStorage.removeItem('userEmail');
-    window.location.href = '/';
+    localStorage.removeItem('rememberedUsername');
+    window.location.href = '/login';
   };
 
   toggleSidebar = () => {
@@ -169,7 +321,7 @@ class Dashboard extends Component {
   };
 
   getStatusColor = (status) => {
-    switch(status) {
+    switch(status?.toLowerCase()) {
       case 'approved': return '#4caf50';
       case 'rejected': return '#f44336';
       case 'pending': return '#ff9800';
@@ -192,13 +344,11 @@ class Dashboard extends Component {
         ...styles.sidebar,
         width: sidebarCollapsed ? '80px' : '280px'
       }}>
-        {/* Logo */}
         <div style={styles.sidebarLogo}>
           <span style={styles.logoIcon}>📄</span>
           {!sidebarCollapsed && <span style={styles.logoText}>Admin Portal</span>}
         </div>
 
-        {/* Menu Items */}
         <div style={styles.sidebarMenu}>
           {menuItems.map(item => (
             <button
@@ -215,7 +365,6 @@ class Dashboard extends Component {
           ))}
         </div>
 
-        {/* Bottom Menu */}
         <div style={styles.sidebarBottom}>
           <button style={styles.menuItem} onClick={this.toggleSidebar}>
             <span style={styles.menuIcon}>{sidebarCollapsed ? '→' : '←'}</span>
@@ -243,19 +392,16 @@ class Dashboard extends Component {
         </div>
 
         <div style={styles.topBarRight}>
-          {/* Time Display */}
           <div style={styles.timeDisplay}>
             <span style={styles.timeIcon}>🕐</span>
             <span style={styles.timeText}>{currentTime}</span>
           </div>
 
-          {/* Notifications */}
           <button style={styles.topBarIcon}>
             🔔
             <span style={styles.notificationBadge}>3</span>
           </button>
 
-          {/* Profile Menu */}
           <div style={styles.profileContainer}>
             <button 
               style={styles.profileButton}
@@ -281,10 +427,10 @@ class Dashboard extends Component {
                   </div>
                 </div>
                 <div style={styles.profileMenuItems}>
-                  <button style={styles.profileMenuItem}>
+                  <button style={styles.profileMenuItem} onClick={() => this.handlePageChange('settings')}>
                     <span style={styles.menuIcon}>👤</span> My Profile
                   </button>
-                  <button style={styles.profileMenuItem}>
+                  <button style={styles.profileMenuItem} onClick={() => this.handlePageChange('settings')}>
                     <span style={styles.menuIcon}>⚙️</span> Settings
                   </button>
                   <div style={styles.menuDivider}></div>
@@ -301,32 +447,32 @@ class Dashboard extends Component {
   };
 
   renderDashboard = () => {
-    const { stats, graphData } = this.state;
+    const { stats, graphData, statsLoading, graphLoading } = this.state;
 
     return (
       <div style={styles.dashboardContent}>
-        {/* Stats Cards */}
+        {/* Stats Cards - Using correct field names from API */}
         <div style={styles.statsGrid}>
           <div style={styles.statCard}>
-            <div style={styles.statIcon}>👥</div>
+            <div style={styles.statIcon}>📋</div>
             <div style={styles.statInfo}>
-              <h3 style={styles.statValue}>{stats.total_candidates || 0}</h3>
-              <p style={styles.statLabel}>Total Candidates</p>
+              <h3 style={styles.statValue}>{statsLoading ? '...' : (stats.total_requests || 0)}</h3>
+              <p style={styles.statLabel}>Total Requests</p>
             </div>
           </div>
 
           <div style={styles.statCard}>
             <div style={styles.statIcon}>⏳</div>
             <div style={styles.statInfo}>
-              <h3 style={styles.statValue}>{stats.pending_reviews || 0}</h3>
-              <p style={styles.statLabel}>Pending Review</p>
+              <h3 style={styles.statValue}>{statsLoading ? '...' : (stats.pending || 0)}</h3>
+              <p style={styles.statLabel}>Pending</p>
             </div>
           </div>
 
           <div style={styles.statCard}>
             <div style={styles.statIcon}>✅</div>
             <div style={styles.statInfo}>
-              <h3 style={styles.statValue}>{stats.approved || 0}</h3>
+              <h3 style={styles.statValue}>{statsLoading ? '...' : (stats.approved || 0)}</h3>
               <p style={styles.statLabel}>Approved</p>
             </div>
           </div>
@@ -334,20 +480,22 @@ class Dashboard extends Component {
           <div style={styles.statCard}>
             <div style={styles.statIcon}>❌</div>
             <div style={styles.statInfo}>
-              <h3 style={styles.statValue}>{stats.rejected || 0}</h3>
+              <h3 style={styles.statValue}>{statsLoading ? '...' : (stats.rejected || 0)}</h3>
               <p style={styles.statLabel}>Rejected</p>
             </div>
           </div>
         </div>
 
-        {/* Graph Placeholder */}
+        {/* Graph Section */}
         <div style={styles.graphSection}>
-          <h3 style={styles.sectionTitle}>Applications Overview</h3>
+          <h3 style={styles.sectionTitle}>Submissions Over Time</h3>
           <div style={styles.graphPlaceholder}>
-            {graphData ? (
+            {graphLoading ? (
+              <p>Loading graph data...</p>
+            ) : graphData ? (
               <pre>{JSON.stringify(graphData, null, 2)}</pre>
             ) : (
-              <p>Loading graph data...</p>
+              <p>No graph data available</p>
             )}
           </div>
         </div>
@@ -361,82 +509,126 @@ class Dashboard extends Component {
     );
   };
 
-  renderCandidates = () => {
-    return (
-      <div style={styles.candidatesContent}>
-        <div style={styles.candidatesHeader}>
-          <h3 style={styles.sectionTitle}>All Candidates</h3>
+renderCandidates = () => {
+  const { statusFilter, candidatesLoading, hasMore } = this.state;
+
+  return (
+    <div style={styles.candidatesContent}>
+      <div style={styles.candidatesHeader}>
+        <h3 style={styles.sectionTitle}>All Candidates</h3>
+        <div style={styles.filterContainer}>
+          <select 
+            style={styles.filterSelect}
+            value={statusFilter || ''}
+            onChange={(e) => this.handleStatusFilter(e.target.value || null)}
+          >
+            <option value="">All Status</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
           <input 
             type="text" 
             placeholder="Search candidates..." 
             style={styles.searchInput}
+            onChange={(e) => {
+              // Implement search functionality
+              console.log('Search:', e.target.value);
+            }}
           />
         </div>
-        {this.renderCandidatesTable()}
       </div>
-    );
-  };
+      
+      {this.renderCandidatesTable()}
+      
+      {hasMore && !candidatesLoading && (
+        <button 
+          style={styles.loadMoreButton}
+          onClick={this.loadMore}
+        >
+          Load More
+        </button>
+      )}
+    </div>
+  );
+};
 
-  renderCandidatesTable = (limited = false) => {
-    const { candidates, isLoading } = this.state;
-    const displayCandidates = limited ? candidates.slice(0, 5) : candidates;
+renderCandidatesTable = (limited = false) => {
+  const { candidates, candidatesLoading } = this.state;
+  const displayCandidates = limited ? candidates.slice(0, 5) : candidates;
 
-    if (isLoading) {
-      return <div style={styles.loading}>Loading candidates...</div>;
-    }
+  if (candidatesLoading && displayCandidates.length === 0) {
+    return <div style={styles.loading}>Loading candidates...</div>;
+  }
 
-    return (
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            <th style={styles.th}>Name</th>
-            <th style={styles.th}>Email</th>
-            <th style={styles.th}>Phone</th>
-            <th style={styles.th}>Status</th>
-            <th style={styles.th}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {displayCandidates.map(candidate => (
-            <tr key={candidate.id} style={styles.tr}>
-              <td style={styles.td}>{`${candidate.first_name} ${candidate.last_name}`}</td>
-              <td style={styles.td}>{candidate.email}</td>
-              <td style={styles.td}>{candidate.phone_number}</td>
+  if (!displayCandidates || displayCandidates.length === 0) {
+    return <div style={styles.loading}>No candidates found</div>;
+  }
+
+  return (
+    <table style={styles.table}>
+      <thead>
+        <tr>
+          <th style={styles.th}>Name</th>
+          <th style={styles.th}>Email</th>
+          <th style={styles.th}>Phone</th>
+          <th style={styles.th}>Status</th>
+          <th style={styles.th}>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {displayCandidates.map(item => {
+          // The candidate data is nested inside a 'candidate' property
+          const candidate = item.candidate || {};
+          const status = item.status || 'pending';
+          const id = item.id;
+          
+          return (
+            <tr key={id} style={styles.tr}>
+              <td style={styles.td}>
+                {`${candidate.first_name || ''} ${candidate.last_name || ''}`}
+              </td>
+              <td style={styles.td}>{candidate.email || 'N/A'}</td>
+              <td style={styles.td}>{candidate.phone_number || 'N/A'}</td>
               <td style={styles.td}>
                 <span style={{
                   ...styles.statusBadge,
-                  backgroundColor: this.getStatusColor(candidate.status),
+                  backgroundColor: this.getStatusColor(status),
                   color: 'white'
                 }}>
-                  {candidate.status || 'pending'}
+                  {status}
                 </span>
               </td>
               <td style={styles.td}>
                 <button 
                   style={styles.actionButton}
-                  onClick={() => this.fetchCandidateDetails(candidate.id)}
+                  onClick={() => this.fetchCandidateDetails(id)}
+                  title="View Details"
                 >
                   👁️
                 </button>
                 <button 
                   style={styles.actionButton}
-                  onClick={() => this.downloadCV(candidate.id)}
+                  onClick={() => this.downloadCV(id)}
+                  title="Download CV"
                 >
                   📥
                 </button>
                 <button 
                   style={styles.actionButton}
-                  onClick={() => this.openStatusModal(candidate.id, candidate.status)}
+                  onClick={() => this.openStatusModal(id, status)}
+                  title="Update Status"
                 >
                   ✏️
                 </button>
               </td>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    );
-  };
+          );
+        })}
+      </tbody>
+    </table>
+  );
+};
 
   renderStatusModal = () => {
     const { showStatusModal, selectedStatus, statusUpdateLoading } = this.state;
@@ -499,42 +691,62 @@ class Dashboard extends Component {
             {activePage === 'dashboard' && this.renderDashboard()}
             {activePage === 'candidates' && this.renderCandidates()}
             {activePage === 'analytics' && (
-              <div style={styles.comingSoon}>Analytics Page Coming Soon</div>
+              <div style={styles.comingSoon}>📈 Analytics Page Coming Soon</div>
             )}
             {activePage === 'settings' && (
-              <div style={styles.comingSoon}>Settings Page Coming Soon</div>
+              <div style={styles.comingSoon}>⚙️ Settings Page Coming Soon</div>
             )}
           </div>
 
           {/* Candidate Details Side Panel */}
-          {selectedCandidate && (
-            <div style={styles.detailsPanel}>
-              <div style={styles.detailsHeader}>
-                <h3>Candidate Details</h3>
-                <button 
-                  style={styles.closeButton}
-                  onClick={() => this.setState({ selectedCandidate: null })}
-                >×</button>
-              </div>
-              <div style={styles.detailsBody}>
-                <p><strong>Name:</strong> {selectedCandidate.first_name} {selectedCandidate.last_name}</p>
-                <p><strong>Email:</strong> {selectedCandidate.email}</p>
-                <p><strong>Phone:</strong> {selectedCandidate.phone_number}</p>
-                <p><strong>National ID:</strong> {selectedCandidate.national_id || 'N/A'}</p>
-                <p><strong>Fan Number:</strong> {selectedCandidate.fan_number || 'N/A'}</p>
-                <p><strong>Status:</strong> 
-                  <span style={{
-                    ...styles.statusBadge,
-                    backgroundColor: this.getStatusColor(selectedCandidate.status),
-                    color: 'white',
-                    marginLeft: '10px'
-                  }}>
-                    {selectedCandidate.status || 'pending'}
-                  </span>
-                </p>
-              </div>
-            </div>
-          )}
+{selectedCandidate && (
+  <div style={styles.detailsPanel}>
+    <div style={styles.detailsHeader}>
+      <h3 style={{ margin: 0 }}>Candidate Details</h3>
+      <button 
+        style={styles.closeButton}
+        onClick={() => this.setState({ selectedCandidate: null })}
+      >×</button>
+    </div>
+    <div style={styles.detailsBody}>
+      {/* Handle both possible data structures */}
+      {(() => {
+        const candidate = selectedCandidate.candidate || selectedCandidate;
+        const status = selectedCandidate.status || candidate.status || 'pending';
+        
+        return (
+          <>
+            <p><strong>Name:</strong> {candidate.first_name} {candidate.last_name}</p>
+            <p><strong>Email:</strong> {candidate.email}</p>
+            <p><strong>Phone:</strong> {candidate.phone_number}</p>
+            <p><strong>National ID:</strong> {candidate.national_id || 'N/A'}</p>
+            <p><strong>Fan Number:</strong> {candidate.fan_number || 'N/A'}</p>
+            <p><strong>Status:</strong> 
+              <span style={{
+                ...styles.statusBadge,
+                backgroundColor: this.getStatusColor(status),
+                color: 'white',
+                marginLeft: '10px'
+              }}>
+                {status}
+              </span>
+            </p>
+            <button 
+              style={{
+                ...styles.confirmButton,
+                width: '100%',
+                marginTop: '20px'
+              }}
+              onClick={() => this.downloadCV(selectedCandidate.id || candidate.id)}
+            >
+              📥 Download CV
+            </button>
+          </>
+        );
+      })()}
+    </div>
+  </div>
+)}
         </div>
 
         {/* Status Update Modal */}
@@ -551,7 +763,7 @@ const styles = {
     fontFamily: 'Arial, sans-serif'
   },
 
-  // Sidebar Styles
+  // Sidebar Styles (keep your existing sidebar styles)
   sidebar: {
     position: 'fixed',
     top: 0,
@@ -855,12 +1067,35 @@ const styles = {
     alignItems: 'center',
     marginBottom: '20px'
   },
+  filterContainer: {
+    display: 'flex',
+    gap: '10px'
+  },
+  filterSelect: {
+    padding: '10px',
+    border: '1px solid #e0e0e0',
+    borderRadius: '8px',
+    fontSize: '14px',
+    minWidth: '150px'
+  },
   searchInput: {
     padding: '10px 15px',
     border: '1px solid #e0e0e0',
     borderRadius: '8px',
     width: '300px',
     fontSize: '14px'
+  },
+  loadMoreButton: {
+    width: '100%',
+    padding: '12px',
+    marginTop: '20px',
+    background: '#667eea',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600'
   },
 
   // Table Styles
@@ -888,7 +1123,8 @@ const styles = {
     padding: '4px 8px',
     borderRadius: '4px',
     fontSize: '12px',
-    fontWeight: '500'
+    fontWeight: '500',
+    display: 'inline-block'
   },
   actionButton: {
     background: 'none',
