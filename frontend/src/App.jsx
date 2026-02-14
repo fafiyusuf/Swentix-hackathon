@@ -1,8 +1,9 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import Request from './pages/Request'; 
+import Request from './Request'; 
 import Login from './components/Login'; // Assuming you have a Login component
-import Dashboard from './pages/dashboard/main'; // Assuming you have a Dashboard component
-
+import Dashboard from './pages/dashboard/dashboard'; // Assuming you have a Dashboard component
+import 'antd/dist/reset.css'; // For Ant Design v5
+import './index.css'
 // --- Protective Wrapper Component ---
 const ProtectedRoute = ({ children }) => {
   // Replace this with your actual authentication logic
@@ -28,11 +29,7 @@ function App() {
         {/* Protected Routes */}
         <Route 
           path="/dashboard" 
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          } 
+          element={<Dashboard />}
         />
       </Routes>
     </Router>
