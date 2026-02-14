@@ -1,0 +1,61 @@
+# Root gitignore for monorepo
+
+# Byte-compiled / Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment / secrets
+.env
+*.env
+
+# Python virtual environments
+venv/
+env/
+.venv/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# VSCode / IDE files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python packaging
+*.egg
+*.egg-info/
+dist/
+build/
+*.wheel
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# Data cache / downloaded files
+**/data/*.db
+**/data/*.sqlite
+**/data/*.pkl
+
+# LangGraph / model cache
+**/models/
+**/cache/
+
+# Node/Vite
+**/node_modules/
+**/dist/
+**/.vite/
+
+# Frontend env files
+frontend/.env*
+
