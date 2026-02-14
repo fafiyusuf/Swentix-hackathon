@@ -1,16 +1,28 @@
 import React, { Component } from "react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  LineChart,
+  Line
+} from 'recharts';
 
 class Dashboard extends Component {
   state = {
     // User info
-    userEmail: localStorage.getItem('userEmail') || 
-               localStorage.getItem('username') || 
-               'Admin User',
-    
+    userEmail: localStorage.getItem('userEmail') ||
+      localStorage.getItem('username') ||
+      'Admin User',
+
     // Sidebar state
     sidebarCollapsed: false,
     activePage: 'dashboard',
-    
+
     // Dashboard data - using correct field names from API
     stats: {
       total_requests: 0,
@@ -19,17 +31,17 @@ class Dashboard extends Component {
       pending: 0
     },
     candidates: [],
-    graphData: null,
+    graphData: [],
     selectedCandidate: null,
-    
+
     // Filter state for candidates
     statusFilter: null, // 'approved', 'rejected', 'pending', or null for all
-    
+
     // UI states
     isLoading: false,
     showProfileMenu: false,
     currentTime: new Date().toLocaleTimeString(),
-    
+
     // Modal states
     showStatusModal: false,
     selectedCandidateId: null,
@@ -44,7 +56,10 @@ class Dashboard extends Component {
     // Pagination
     limit: 50,
     skip: 0,
-    hasMore: true
+    hasMore: true,
+
+    // Chart type
+    chartType: 'bar' // 'bar' or 'line'
   };
 
   componentDidMount() {
@@ -64,10 +79,17 @@ class Dashboard extends Component {
     this.fetchDashboardStats();
     this.fetchCandidates();
     this.fetchGraphData();
+
+    // Set up auto-refresh every 30 seconds
+    this.refreshInterval = setInterval(() => {
+      this.fetchDashboardStats();
+      this.fetchGraphData();
+    }, 30000);
   }
 
   componentWillUnmount() {
     clearInterval(this.timer);
+    clearInterval(this.refreshInterval);
   }
 
   // Helper to get auth headers
@@ -86,14 +108,14 @@ class Dashboard extends Component {
       const response = await fetch('http://127.0.0.1:8000/api/v1/dashboard/stats', {
         headers: this.getAuthHeaders()
       });
-      
+
       if (response.status === 401) {
         this.handleLogout();
         return;
       }
 
       const data = await response.json();
-      console.log('Stats data:', data); // Debug log
+      console.log('Stats data:', data);
       this.setState({ stats: data, statsLoading: false });
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -103,7 +125,7 @@ class Dashboard extends Component {
 
   fetchCandidates = async (reset = true) => {
     const { statusFilter, limit, skip } = this.state;
-    
+
     if (reset) {
       this.setState({ candidatesLoading: true, skip: 0, candidates: [] });
     } else {
@@ -114,14 +136,14 @@ class Dashboard extends Component {
       // Build URL with query parameters
       let url = 'http://127.0.0.1:8000/api/v1/candidates?';
       const params = [];
-      
+
       if (statusFilter) {
         params.push(`status=${statusFilter}`);
       }
-      
+
       params.push(`limit=${limit}`);
       params.push(`skip=${reset ? 0 : skip}`);
-      
+
       url += params.join('&');
 
       const response = await fetch(url, {
@@ -134,14 +156,13 @@ class Dashboard extends Component {
       }
 
       const data = await response.json();
-      console.log('Candidates data:', data); // Debug log
+      console.log('Candidates data:', data);
 
-      // Check if data is an array (as per API spec, it returns a string? Let's handle both)
+      // Check if data is an array
       let candidatesData = [];
       if (Array.isArray(data)) {
         candidatesData = data;
       } else if (typeof data === 'string') {
-        // If it's a string, maybe it's JSON string
         try {
           candidatesData = JSON.parse(data);
         } catch {
@@ -174,36 +195,47 @@ class Dashboard extends Component {
       }
 
       const data = await response.json();
-      console.log('Graph data:', data); // Debug log
-      this.setState({ graphData: data, graphLoading: false });
+      console.log('Graph data:', data);
+
+      // Format data for Recharts
+      const formattedData = Array.isArray(data) ? data.map(item => ({
+        date: this.formatDate(item.date),
+        submissions: item.total || 0,
+        approved: item.approved || 0,
+        pending: item.pending || 0,
+        rejected: item.rejected || 0
+      })) : [];
+
+      this.setState({ graphData: formattedData, graphLoading: false });
     } catch (error) {
       console.error('Error fetching graph data:', error);
       this.setState({ graphLoading: false });
     }
   };
 
-fetchCandidateDetails = async (candidateId) => {
-  try {
-    const response = await fetch(`http://127.0.0.1:8000/api/v1/candidates/${candidateId}`, {
-      headers: this.getAuthHeaders()
-    });
+  formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
 
-    if (response.status === 401) {
-      this.handleLogout();
-      return;
+  fetchCandidateDetails = async (candidateId) => {
+    try {
+      const response = await fetch(`http://127.0.0.1:8000/api/v1/candidates/${candidateId}`, {
+        headers: this.getAuthHeaders()
+      });
+
+      if (response.status === 401) {
+        this.handleLogout();
+        return;
+      }
+
+      const data = await response.json();
+      console.log('Candidate details:', data);
+      this.setState({ selectedCandidate: data });
+    } catch (error) {
+      console.error('Error fetching candidate details:', error);
     }
-
-    const data = await response.json();
-    console.log('Candidate details:', data);
-    
-    // The data might be nested or direct - check the structure
-    // Based on your data, it might return something like:
-    // { candidate: {...}, status: "...", cv_path: "...", ... }
-    this.setState({ selectedCandidate: data });
-  } catch (error) {
-    console.error('Error fetching candidate details:', error);
-  }
-};
+  };
 
   downloadCV = async (candidateId) => {
     try {
@@ -236,9 +268,9 @@ fetchCandidateDetails = async (candidateId) => {
 
   updateCandidateStatus = async () => {
     const { selectedCandidateId, selectedStatus } = this.state;
-    
+
     this.setState({ statusUpdateLoading: true });
-    
+
     try {
       const response = await fetch(`http://127.0.0.1:8000/api/v1/candidates/${selectedCandidateId}/status`, {
         method: 'PATCH',
@@ -255,12 +287,13 @@ fetchCandidateDetails = async (candidateId) => {
         // Refresh data
         await this.fetchDashboardStats();
         await this.fetchCandidates(true);
-        
+        await this.fetchGraphData();
+
         // Clear selected candidate if it was the one updated
         if (this.state.selectedCandidate?.id === selectedCandidateId) {
           this.setState({ selectedCandidate: null });
         }
-        
+
         this.setState({ showStatusModal: false, statusUpdateLoading: false });
         this.showNotification('Status updated successfully!', 'success');
       } else {
@@ -312,6 +345,12 @@ fetchCandidateDetails = async (candidateId) => {
     this.setState({ activePage: page });
   };
 
+  toggleChartType = () => {
+    this.setState(prevState => ({
+      chartType: prevState.chartType === 'bar' ? 'line' : 'bar'
+    }));
+  };
+
   openStatusModal = (candidateId, currentStatus) => {
     this.setState({
       showStatusModal: true,
@@ -321,7 +360,7 @@ fetchCandidateDetails = async (candidateId) => {
   };
 
   getStatusColor = (status) => {
-    switch(status?.toLowerCase()) {
+    switch (status?.toLowerCase()) {
       case 'approved': return '#4caf50';
       case 'rejected': return '#f44336';
       case 'pending': return '#ff9800';
@@ -370,7 +409,7 @@ fetchCandidateDetails = async (candidateId) => {
             <span style={styles.menuIcon}>{sidebarCollapsed ? '→' : '←'}</span>
             {!sidebarCollapsed && <span style={styles.menuLabel}>Collapse</span>}
           </button>
-          
+
           <button style={styles.menuItem} onClick={this.handleLogout}>
             <span style={styles.menuIcon}>🚪</span>
             {!sidebarCollapsed && <span style={styles.menuLabel}>Logout</span>}
@@ -403,7 +442,7 @@ fetchCandidateDetails = async (candidateId) => {
           </button>
 
           <div style={styles.profileContainer}>
-            <button 
+            <button
               style={styles.profileButton}
               onClick={() => this.setState({ showProfileMenu: !showProfileMenu })}
             >
@@ -434,7 +473,7 @@ fetchCandidateDetails = async (candidateId) => {
                     <span style={styles.menuIcon}>⚙️</span> Settings
                   </button>
                   <div style={styles.menuDivider}></div>
-                  <button style={{...styles.profileMenuItem, color: '#f44336'}} onClick={this.handleLogout}>
+                  <button style={{ ...styles.profileMenuItem, color: '#f44336' }} onClick={this.handleLogout}>
                     <span style={styles.menuIcon}>🚪</span> Logout
                   </button>
                 </div>
@@ -447,11 +486,11 @@ fetchCandidateDetails = async (candidateId) => {
   };
 
   renderDashboard = () => {
-    const { stats, graphData, statsLoading, graphLoading } = this.state;
+    const { stats, graphData, statsLoading, graphLoading, chartType, item } = this.state;
 
     return (
       <div style={styles.dashboardContent}>
-        {/* Stats Cards - Using correct field names from API */}
+        {/* Stats Cards */}
         <div style={styles.statsGrid}>
           <div style={styles.statCard}>
             <div style={styles.statIcon}>📋</div>
@@ -486,16 +525,71 @@ fetchCandidateDetails = async (candidateId) => {
           </div>
         </div>
 
-        {/* Graph Section */}
+        {/* Graph Section with Chart */}
         <div style={styles.graphSection}>
-          <h3 style={styles.sectionTitle}>Submissions Over Time</h3>
-          <div style={styles.graphPlaceholder}>
+          <div style={styles.graphHeader}>
+            <h3 style={styles.sectionTitle}>Submissions Over Time</h3>
+            <div style={styles.chartControls}>
+              <button
+                style={{
+                  ...styles.chartToggleButton,
+                  backgroundColor: chartType === 'bar' ? '#667eea' : '#e0e0e0',
+                  color: chartType === 'bar' ? 'white' : '#333'
+                }}
+                onClick={this.toggleChartType}
+              >
+                {chartType === 'bar' ? 'Switch to Line' : 'Switch to Bar'}
+              </button>
+              <button
+                style={styles.refreshButton}
+                onClick={() => {
+                  this.fetchGraphData();
+                  this.fetchDashboardStats();
+                }}
+              >
+                🔄 Refresh
+              </button>
+            </div>
+          </div>
+
+          <div style={styles.graphContainer}>
             {graphLoading ? (
-              <p>Loading graph data...</p>
-            ) : graphData ? (
-              <pre>{JSON.stringify(graphData, null, 2)}</pre>
+              <div style={styles.graphPlaceholder}>
+                <div style={styles.loader}></div>
+                <p>Loading chart data...</p>
+              </div>
+            ) : graphData && graphData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={400}>
+                {chartType === 'bar' ? (
+                  <BarChart data={graphData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="submissions" fill="#8884d8" name="Total Submissions" />
+                    <Bar dataKey="approved" fill="#4caf50" name="Approved" />
+                    <Bar dataKey="pending" fill="#ff9800" name="Pending" />
+                    <Bar dataKey="rejected" fill="#f44336" name="Rejected" />
+                  </BarChart>
+                ) : (
+                  <LineChart data={graphData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="submissions" stroke="#8884d8" name="Total Submissions" />
+                    <Line type="monotone" dataKey="approved" stroke="#4caf50" name="Approved" />
+                    <Line type="monotone" dataKey="pending" stroke="#ff9800" name="Pending" />
+                    <Line type="monotone" dataKey="rejected" stroke="#f44336" name="Rejected" />
+                  </LineChart>
+                )}
+              </ResponsiveContainer>
             ) : (
-              <p>No graph data available</p>
+              <div style={styles.graphPlaceholder}>
+                <p>No graph data available</p>
+              </div>
             )}
           </div>
         </div>
@@ -509,126 +603,125 @@ fetchCandidateDetails = async (candidateId) => {
     );
   };
 
-renderCandidates = () => {
-  const { statusFilter, candidatesLoading, hasMore } = this.state;
+  renderCandidates = () => {
+    const { statusFilter, candidatesLoading, hasMore } = this.state;
 
-  return (
-    <div style={styles.candidatesContent}>
-      <div style={styles.candidatesHeader}>
-        <h3 style={styles.sectionTitle}>All Candidates</h3>
-        <div style={styles.filterContainer}>
-          <select 
-            style={styles.filterSelect}
-            value={statusFilter || ''}
-            onChange={(e) => this.handleStatusFilter(e.target.value || null)}
-          >
-            <option value="">All Status</option>
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-          </select>
-          <input 
-            type="text" 
-            placeholder="Search candidates..." 
-            style={styles.searchInput}
-            onChange={(e) => {
-              // Implement search functionality
-              console.log('Search:', e.target.value);
-            }}
-          />
+    return (
+      <div style={styles.candidatesContent}>
+        <div style={styles.candidatesHeader}>
+          <h3 style={styles.sectionTitle}>All Candidates</h3>
+          <div style={styles.filterContainer}>
+            <select
+              style={styles.filterSelect}
+              value={statusFilter || ''}
+              onChange={(e) => this.handleStatusFilter(e.target.value || null)}
+            >
+              <option value="">All Status</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+            <input
+              type="text"
+              placeholder="Search candidates..."
+              style={styles.searchInput}
+              onChange={(e) => {
+                // Implement search functionality
+                console.log('Search:', e.target.value);
+              }}
+            />
+          </div>
         </div>
+
+        {this.renderCandidatesTable()}
+
+        {hasMore && !candidatesLoading && (
+          <button
+            style={styles.loadMoreButton}
+            onClick={this.loadMore}
+          >
+            Load More
+          </button>
+        )}
       </div>
-      
-      {this.renderCandidatesTable()}
-      
-      {hasMore && !candidatesLoading && (
-        <button 
-          style={styles.loadMoreButton}
-          onClick={this.loadMore}
-        >
-          Load More
-        </button>
-      )}
-    </div>
-  );
-};
+    );
+  };
 
-renderCandidatesTable = (limited = false) => {
-  const { candidates, candidatesLoading } = this.state;
-  const displayCandidates = limited ? candidates.slice(0, 5) : candidates;
+  renderCandidatesTable = (limited = false) => {
+    const { candidates, candidatesLoading } = this.state;
+    const displayCandidates = limited ? candidates.slice(0, 5) : candidates;
 
-  if (candidatesLoading && displayCandidates.length === 0) {
-    return <div style={styles.loading}>Loading candidates...</div>;
-  }
+    if (candidatesLoading && displayCandidates.length === 0) {
+      return <div style={styles.loading}>Loading candidates...</div>;
+    }
 
-  if (!displayCandidates || displayCandidates.length === 0) {
-    return <div style={styles.loading}>No candidates found</div>;
-  }
+    if (!displayCandidates || displayCandidates.length === 0) {
+      return <div style={styles.loading}>No candidates found</div>;
+    }
 
-  return (
-    <table style={styles.table}>
-      <thead>
-        <tr>
-          <th style={styles.th}>Name</th>
-          <th style={styles.th}>Email</th>
-          <th style={styles.th}>Phone</th>
-          <th style={styles.th}>Status</th>
-          <th style={styles.th}>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {displayCandidates.map(item => {
-          // The candidate data is nested inside a 'candidate' property
-          const candidate = item.candidate || {};
-          const status = item.status || 'pending';
-          const id = item.id;
-          
-          return (
-            <tr key={id} style={styles.tr}>
-              <td style={styles.td}>
-                {`${candidate.first_name || ''} ${candidate.last_name || ''}`}
-              </td>
-              <td style={styles.td}>{candidate.email || 'N/A'}</td>
-              <td style={styles.td}>{candidate.phone_number || 'N/A'}</td>
-              <td style={styles.td}>
-                <span style={{
-                  ...styles.statusBadge,
-                  backgroundColor: this.getStatusColor(status),
-                  color: 'white'
-                }}>
-                  {status}
-                </span>
-              </td>
-              <td style={styles.td}>
-                <button 
-                  style={styles.actionButton}
-                  onClick={() => this.fetchCandidateDetails(id)}
-                  title="View Details"
-                >
-                  👁️
-                </button>
-                <button 
-                  style={styles.actionButton}
-                  onClick={() => this.downloadCV(id)}
-                  title="Download CV"
-                >
-                  📥
-                </button>
-                <button 
-                  style={styles.actionButton}
-                  onClick={() => this.openStatusModal(id, status)}
-                  title="Update Status"
-                >
-                  ✏️
-                </button>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-};
+    return (
+      <table style={styles.table}>
+        <thead>
+          <tr>
+            <th style={styles.th}>Name</th>
+            <th style={styles.th}>Email</th>
+            <th style={styles.th}>Phone</th>
+            <th style={styles.th}>Status</th>
+            <th style={styles.th}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {displayCandidates.map(item => {
+            const candidate = item.candidate || {};
+            const status = item.status || 'pending';
+            const id = item.id;
+
+            return (
+              <tr key={id} style={styles.tr}>
+                <td style={styles.td}>
+                  {`${candidate.first_name || ''} ${candidate.last_name || ''}`}
+                </td>
+                <td style={styles.td}>{candidate.email || 'N/A'}</td>
+                <td style={styles.td}>{candidate.phone_number || 'N/A'}</td>
+                <td style={styles.td}>
+                  <span style={{
+                    ...styles.statusBadge,
+                    backgroundColor: this.getStatusColor(status),
+                    color: 'white'
+                  }}>
+                    {status}
+                  </span>
+                </td>
+                <td style={styles.td}>
+                  <button
+                    style={styles.actionButton}
+                    onClick={() => this.fetchCandidateDetails(id)}
+                    title="View Details"
+                  >
+                    👁️
+                  </button>
+                  <button
+                    style={styles.actionButton}
+                    onClick={() => this.downloadCV(id)}
+                    title="Download CV"
+                  >
+                    📥
+                  </button>
+                  <button
+                    style={styles.actionButton}
+                    onClick={() => this.openStatusModal(id, status)}
+                    title="Update Status"
+                  >
+                    ✏️
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    );
+  };
 
   renderStatusModal = () => {
     const { showStatusModal, selectedStatus, statusUpdateLoading } = this.state;
@@ -639,8 +732,8 @@ renderCandidatesTable = (limited = false) => {
       <div style={styles.modalOverlay} onClick={() => this.setState({ showStatusModal: false })}>
         <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
           <h3 style={styles.modalTitle}>Update Candidate Status</h3>
-          
-          <select 
+
+          <select
             value={selectedStatus}
             onChange={(e) => this.setState({ selectedStatus: e.target.value })}
             style={styles.select}
@@ -651,13 +744,13 @@ renderCandidatesTable = (limited = false) => {
           </select>
 
           <div style={styles.modalButtons}>
-            <button 
+            <button
               style={styles.cancelButton}
               onClick={() => this.setState({ showStatusModal: false })}
             >
               Cancel
             </button>
-            <button 
+            <button
               style={styles.confirmButton}
               onClick={this.updateCandidateStatus}
               disabled={statusUpdateLoading}
@@ -699,54 +792,53 @@ renderCandidatesTable = (limited = false) => {
           </div>
 
           {/* Candidate Details Side Panel */}
-{selectedCandidate && (
-  <div style={styles.detailsPanel}>
-    <div style={styles.detailsHeader}>
-      <h3 style={{ margin: 0 }}>Candidate Details</h3>
-      <button 
-        style={styles.closeButton}
-        onClick={() => this.setState({ selectedCandidate: null })}
-      >×</button>
-    </div>
-    <div style={styles.detailsBody}>
-      {/* Handle both possible data structures */}
-      {(() => {
-        const candidate = selectedCandidate.candidate || selectedCandidate;
-        const status = selectedCandidate.status || candidate.status || 'pending';
-        
-        return (
-          <>
-            <p><strong>Name:</strong> {candidate.first_name} {candidate.last_name}</p>
-            <p><strong>Email:</strong> {candidate.email}</p>
-            <p><strong>Phone:</strong> {candidate.phone_number}</p>
-            <p><strong>National ID:</strong> {candidate.national_id || 'N/A'}</p>
-            <p><strong>Fan Number:</strong> {candidate.fan_number || 'N/A'}</p>
-            <p><strong>Status:</strong> 
-              <span style={{
-                ...styles.statusBadge,
-                backgroundColor: this.getStatusColor(status),
-                color: 'white',
-                marginLeft: '10px'
-              }}>
-                {status}
-              </span>
-            </p>
-            <button 
-              style={{
-                ...styles.confirmButton,
-                width: '100%',
-                marginTop: '20px'
-              }}
-              onClick={() => this.downloadCV(selectedCandidate.id || candidate.id)}
-            >
-              📥 Download CV
-            </button>
-          </>
-        );
-      })()}
-    </div>
-  </div>
-)}
+          {selectedCandidate && (
+            <div style={styles.detailsPanel}>
+              <div style={styles.detailsHeader}>
+                <h3 style={{ margin: 0 }}>Candidate Details</h3>
+                <button
+                  style={styles.closeButton}
+                  onClick={() => this.setState({ selectedCandidate: null })}
+                >×</button>
+              </div>
+              <div style={styles.detailsBody}>
+                {(() => {
+                  const candidate = selectedCandidate.candidate || selectedCandidate;
+                  const status = selectedCandidate.status || candidate.status || 'pending';
+
+                  return (
+                    <>
+                      <p><strong>Name:</strong> {candidate.first_name} {candidate.last_name}</p>
+                      <p><strong>Email:</strong> {candidate.email}</p>
+                      <p><strong>Phone:</strong> {candidate.phone_number}</p>
+                      <p><strong>National ID:</strong> {candidate.national_id || 'N/A'}</p>
+                      <p><strong>Fan Number:</strong> {candidate.fan_number || 'N/A'}</p>
+                      <p><strong>Status:</strong>
+                        <span style={{
+                          ...styles.statusBadge,
+                          backgroundColor: this.getStatusColor(status),
+                          color: 'white',
+                          marginLeft: '10px'
+                        }}>
+                          {status}
+                        </span>
+                      </p>
+                      <button
+                        style={{
+                          ...styles.confirmButton,
+                          width: '100%',
+                          marginTop: '20px'
+                        }}
+                        onClick={() => this.downloadCV(selectedCandidate.id || candidate.id)}
+                      >
+                        📥 Download CV
+                      </button>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Status Update Modal */}
@@ -763,7 +855,7 @@ const styles = {
     fontFamily: 'Arial, sans-serif'
   },
 
-  // Sidebar Styles (keep your existing sidebar styles)
+  // Sidebar Styles
   sidebar: {
     position: 'fixed',
     top: 0,
@@ -1033,19 +1125,62 @@ const styles = {
     padding: '20px',
     boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
   },
+  graphHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '20px'
+  },
   sectionTitle: {
     fontSize: '18px',
-    margin: '0 0 20px 0',
+    margin: 0,
     color: '#333'
   },
+  chartControls: {
+    display: 'flex',
+    gap: '10px'
+  },
+  chartToggleButton: {
+    padding: '8px 16px',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500',
+    transition: 'all 0.3s ease'
+  },
+  refreshButton: {
+    padding: '8px 16px',
+    background: '#667eea',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '500'
+  },
+  graphContainer: {
+    height: '400px',
+    width: '100%'
+  },
   graphPlaceholder: {
-    height: '300px',
+    height: '400px',
     background: '#f8f9fa',
     borderRadius: '8px',
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     color: '#999'
+  },
+  loader: {
+    width: '40px',
+    height: '40px',
+    border: '3px solid #f3f3f3',
+    borderTop: '3px solid #667eea',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+    marginBottom: '10px'
   },
   recentSection: {
     background: 'white',
@@ -1232,5 +1367,15 @@ const styles = {
     fontSize: '18px'
   }
 };
+
+// Add keyframe animation
+const style = document.createElement('style');
+style.textContent = `
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+`;
+document.head.appendChild(style);
 
 export default Dashboard;
